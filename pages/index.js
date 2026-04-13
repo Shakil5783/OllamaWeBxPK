@@ -1,6 +1,5 @@
 import Head from 'next/head';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { sendChatMessage, checkConnection } from '../lib/ollama';
 
 export default function Home() {
   const [messages, setMessages] = useState([]);
@@ -9,31 +8,41 @@ export default function Home() {
   const [isConnected, setIsConnected] = useState(false);
   const [currentModel, setCurrentModel] = useState('minimax-m2.7:cloud');
   const [streamingContent, setStreamingContent] = useState('');
+  const [connectionError, setConnectionError] = useState(null);
   
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  // ═══════════════════════════════════════════════════════════════
-  // 🔗 CHECK CONNECTION ON MOUNT
-  // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════
+  // 🔗 CHECK CONNECTION
+  // ═══════════════════════════════════════════════════════════
   
   useEffect(() => {
-    const verifyConnection = async () => {
-      const status = await checkConnection();
-      setIsConnected(status.connected);
-      if (status.model) setCurrentModel(status.model);
+    const checkConnection = async () => {
+      try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        
+        setIsConnected(data.connected);
+        if (data.model) setCurrentModel(data.model);
+        
+        if (data.error) {
+          setConnectionError(data);
+        } else {
+          setConnectionError(null);
+        }
+      } catch (error) {
+        setIsConnected(false);
+        setConnectionError({
+          error: 'Cannot reach server',
+          message: 'Please refresh the page or try again later',
+        });
+      }
     };
-    verifyConnection();
     
-    // Recheck every 30 seconds
-    const interval = setInterval(verifyConnection, 30000);
-    return () => clearInterval(interval);
+    checkConnection();
   }, []);
 
-  // ═══════════════════════════════════════════════════════════════
-  // 🔄 AUTO-SCROLL
-  // ═══════════════════════════════════════════════════════════════
-  
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
@@ -42,9 +51,9 @@ export default function Home() {
     scrollToBottom();
   }, [messages, streamingContent, scrollToBottom]);
 
-  // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════
   // 💬 SEND MESSAGE
-  // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════
   
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -81,14 +90,40 @@ export default function Home() {
     let accumulatedContent = '';
 
     try {
-      await sendChatMessage(
-        apiMessages,
-        (chunk) => {
-          accumulatedContent += chunk;
-          setStreamingContent(accumulatedContent);
-        },
-        abortControllerRef.current.signal
-      );
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: apiMessages, stream: true }),
+        signal: abortControllerRef.current.signal,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || `HTTP ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.content) {
+                accumulatedContent += data.content;
+                setStreamingContent(accumulatedContent);
+              }
+            } catch (e) {}
+          }
+        }
+      }
 
       setMessages((prev) =>
         prev.map((msg) =>
@@ -99,13 +134,23 @@ export default function Home() {
       );
 
     } catch (error) {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMsg.id
-            ? { ...msg, content: `⚠️ Error: ${error.message}` }
-            : msg
-        )
-      );
+      if (error.name === 'AbortError') {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMsg.id
+              ? { ...msg, content: '⚠️ Generation stopped by user' }
+              : msg
+          )
+        );
+      } else {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMsg.id
+              ? { ...msg, content: `⚠️ Error: ${error.message}` }
+              : msg
+          )
+        );
+      }
     } finally {
       setIsLoading(false);
       setStreamingContent('');
@@ -115,8 +160,6 @@ export default function Home() {
   const handleAbort = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
-      setIsLoading(false);
-      setStreamingContent('');
     }
   };
 
@@ -153,7 +196,7 @@ export default function Home() {
                 <div className="flex items-center gap-2">
                   <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 shadow-lg shadow-green-500/50' : 'bg-red-500 animate-pulse'}`} />
                   <span className="text-xs text-slate-400">
-                    {isConnected ? '🟢 Connected' : '🔴 Offline'}
+                    {isConnected ? '🟢 Ready' : '🔴 Not Configured'}
                   </span>
                 </div>
 
@@ -170,6 +213,36 @@ export default function Home() {
           </div>
         </header>
 
+        {/* ⚠️ ERROR BANNER */}
+        {connectionError && (
+          <div className="bg-red-500/10 border-b border-red-500/30">
+            <div className="max-w-4xl mx-auto px-4 py-4">
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">⚠️</span>
+                <div>
+                  <h3 className="font-bold text-red-400">Configuration Required</h3>
+                  <p className="text-sm text-red-300/80 mt-1">
+                    {connectionError.error}
+                  </p>
+                  <p className="text-xs text-red-400/60 mt-2">
+                    {connectionError.message}
+                  </p>
+                  {connectionError.setupUrl && (
+                    <a
+                      href={connectionError.setupUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block mt-3 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 rounded-lg text-sm text-red-300 transition-colors"
+                    >
+                      🔗 Get API Key →
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 💬 CHAT AREA */}
         <main className="max-w-4xl mx-auto px-4 py-6 pb-32">
           {messages.length === 0 && (
@@ -182,22 +255,41 @@ export default function Home() {
                 🚀 Start a conversation with AI-powered by Ollama Cloud
               </p>
               
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
-                {[
-                  '💡 Explain quantum computing simply',
-                  '🎨 Write a creative story about AI',
-                  '📚 Help me understand ML basics',
-                  '🌍 Latest advancements in AI?',
-                ].map((prompt, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setInputValue(prompt.substring(2))}
-                    className="p-4 text-left bg-slate-900/50 hover:bg-slate-800/50 rounded-xl border border-slate-800 hover:border-purple-500/50 transition-all text-sm text-slate-300"
+              {!isConnected && (
+                <div className="p-6 bg-yellow-500/10 border border-yellow-500/30 rounded-xl max-w-xl">
+                  <p className="text-yellow-300 font-bold mb-2">⚠️ Setup Required</p>
+                  <p className="text-sm text-yellow-200/80 mb-4">
+                    Add <code className="bg-slate-800 px-2 py-1 rounded">OLLAMA_API_KEY</code> to your Render environment variables.
+                  </p>
+                  <a
+                    href="https://ollama.com/settings/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 rounded-xl font-bold text-white transition-all"
                   >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
+                    🔑 Get API Key from Ollama.com
+                  </a>
+                </div>
+              )}
+
+              {isConnected && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
+                  {[
+                    '💡 Explain quantum computing simply',
+                    '🎨 Write a creative story about AI',
+                    '📚 Help me understand ML basics',
+                    '🌍 Latest advancements in AI?',
+                  ].map((prompt, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setInputValue(prompt.substring(2))}
+                      className="p-4 text-left bg-slate-900/50 hover:bg-slate-800/50 rounded-xl border border-slate-800 hover:border-purple-500/50 transition-all text-sm text-slate-300"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -283,7 +375,7 @@ export default function Home() {
                       handleSendMessage(e);
                     }
                   }}
-                  placeholder="✨ Type your message... (Enter to send)"
+                  placeholder={isConnected ? "✨ Type your message... (Enter to send)" : "⚠️ API key not configured"}
                   disabled={isLoading || !isConnected}
                   rows={1}
                   className="w-full px-6 py-4 bg-slate-800 border-2 border-slate-700 focus:border-purple-500 rounded-2xl text-white placeholder-slate-500 resize-none outline-none transition-colors disabled:opacity-50"
@@ -320,4 +412,4 @@ export default function Home() {
       </div>
     </>
   );
-      }
+    }
