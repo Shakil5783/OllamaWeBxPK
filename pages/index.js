@@ -7,21 +7,27 @@ export default function Home() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [currentModel, setCurrentModel] = useState('minimax-m2.7:cloud');
   const [streamingContent, setStreamingContent] = useState('');
   
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
 
   // ═══════════════════════════════════════════════════════════════
-  // 🔗 CHECK CONNECTION
+  // 🔗 CHECK CONNECTION ON MOUNT
   // ═══════════════════════════════════════════════════════════════
   
   useEffect(() => {
     const verifyConnection = async () => {
-      const connected = await checkConnection();
-      setIsConnected(connected);
+      const status = await checkConnection();
+      setIsConnected(status.connected);
+      if (status.model) setCurrentModel(status.model);
     };
     verifyConnection();
+    
+    // Recheck every 30 seconds
+    const interval = setInterval(verifyConnection, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // ═══════════════════════════════════════════════════════════════
@@ -76,7 +82,6 @@ export default function Home() {
 
     try {
       await sendChatMessage(
-        'minimax-m2.7:cloud',
         apiMessages,
         (chunk) => {
           accumulatedContent += chunk;
@@ -107,10 +112,6 @@ export default function Home() {
     }
   };
 
-  // ═══════════════════════════════════════════════════════════════
-  // 🛑 ABORT HANDLER
-  // ═══════════════════════════════════════════════════════════════
-  
   const handleAbort = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -119,10 +120,6 @@ export default function Home() {
     }
   };
 
-  // ═══════════════════════════════════════════════════════════════
-  // 🗑️ CLEAR CHAT
-  // ═══════════════════════════════════════════════════════════════
-  
   const handleClearChat = () => {
     setMessages([]);
     setStreamingContent('');
@@ -136,10 +133,7 @@ export default function Home() {
       </Head>
 
       <div className="min-h-screen bg-slate-950">
-        {/* ═══════════════════════════════════════════════════════
-             🌟 HEADER
-             ═══════════════════════════════════════════════════════ */}
-        
+        {/* 🌟 HEADER */}
         <header className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-xl border-b border-slate-800">
           <div className="max-w-4xl mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
@@ -150,7 +144,7 @@ export default function Home() {
                     OLLAMA CHAT PRO
                   </h1>
                   <p className="text-xs text-slate-500">
-                    ✨ minimax-m2.7:cloud • Streaming Ready
+                    ✨ {currentModel} • Streaming Ready
                   </p>
                 </div>
               </div>
@@ -176,10 +170,7 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ═══════════════════════════════════════════════════════
-             💬 CHAT AREA
-             ═══════════════════════════════════════════════════════ */}
-        
+        {/* 💬 CHAT AREA */}
         <main className="max-w-4xl mx-auto px-4 py-6 pb-32">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center min-h-96 text-center">
@@ -278,10 +269,7 @@ export default function Home() {
           <div ref={messagesEndRef} />
         </main>
 
-        {/* ═══════════════════════════════════════════════════════
-             ✏️ INPUT AREA
-             ═══════════════════════════════════════════════════════ */}
-        
+        {/* ✏️ INPUT AREA */}
         <footer className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur-xl border-t border-slate-800">
           <div className="max-w-4xl mx-auto px-4 py-4">
             <form onSubmit={handleSendMessage} className="flex gap-3">
@@ -325,11 +313,11 @@ export default function Home() {
             </form>
 
             <p className="mt-3 text-center text-xs text-slate-600">
-              💡 Press Enter to send • Model: minimax-m2.7:cloud
+              💡 Press Enter to send • Model: {currentModel}
             </p>
           </div>
         </footer>
       </div>
     </>
   );
-}
+      }
