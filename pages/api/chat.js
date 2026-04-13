@@ -7,7 +7,7 @@ import ollama from 'ollama';
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -19,23 +19,23 @@ export default async function handler(req, res) {
 
   try {
     // ═══════════════════════════════════════════════════════════
-    // 🔐 GET CONFIGURATION
+    // 🔐 GET API KEY FROM HEADER OR ENV
     // ═══════════════════════════════════════════════════════════
     
-    const apiKey = process.env.OLLAMA_API_KEY;
-    const model = process.env.OLLAMA_MODEL || 'minimax-m2.7:cloud';
+    const apiKey = req.headers['x-api-key'] || process.env.OLLAMA_API_KEY;
+    const { messages, stream = true, model: requestModel } = req.body;
 
     if (!apiKey) {
-      return res.status(500).json({ 
-        error: 'OLLAMA_API_KEY not configured. Please add it to your Render environment variables.',
-        setupUrl: 'https://ollama.com/settings/keys',
+      return res.status(400).json({ 
+        error: 'API key required. Please add your API key in Settings.',
       });
     }
 
-    const { messages, stream = true } = req.body;
+    // Use request model or fallback to env/default
+    const model = requestModel || process.env.OLLAMA_MODEL || 'minimax-m2.7:cloud';
 
     if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'Invalid messages format. Expected array.' });
+      return res.status(400).json({ error: 'Invalid messages format.' });
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -89,16 +89,15 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('Ollama API Error:', error);
     
-    // Handle specific errors
     if (error.message?.includes('401') || error.message?.includes('unauthorized')) {
       return res.status(401).json({ 
-        error: 'Invalid API key. Please check your OLLAMA_API_KEY.',
+        error: 'Invalid API key. Please check your key in Settings.',
       });
     }
     
     if (error.message?.includes('fetch failed') || error.message?.includes('ENOTFOUND')) {
       return res.status(503).json({ 
-        error: 'Cannot connect to Ollama Cloud. Please check your internet connection.',
+        error: 'Cannot connect to Ollama Cloud. Please try again.',
       });
     }
     
