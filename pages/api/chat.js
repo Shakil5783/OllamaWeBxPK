@@ -2,7 +2,7 @@
 // 🤖 OLLAMA CHAT API ROUTE
 // ═══════════════════════════════════════════════════════════════
 
-import ollama from 'ollama';
+import { Ollama } from 'ollama';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -19,27 +19,41 @@ export default async function handler(req, res) {
 
   try {
     // ═══════════════════════════════════════════════════════════
-    // 🔐 GET API KEY FROM HEADER OR ENV
+    // 🔐 GET API KEY FROM HEADER
     // ═══════════════════════════════════════════════════════════
     
-    const apiKey = req.headers['x-api-key'] || process.env.OLLAMA_API_KEY;
-    const { messages, stream = true, model: requestModel } = req.body;
+    const apiKey = req.headers['x-api-key'];
 
     if (!apiKey) {
       return res.status(400).json({ 
         error: 'API key required. Please add your API key in Settings.',
+        hint: 'Click the ⚙️ settings icon and paste your Ollama API key',
       });
     }
 
-    // Use request model or fallback to env/default
-    const model = requestModel || process.env.OLLAMA_MODEL || 'minimax-m2.7:cloud';
+    const { messages, stream = true, model: requestModel } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Invalid messages format.' });
     }
 
+    // Model selection
+    const model = requestModel || 'minimax-m2.7:cloud';
+
     // ═══════════════════════════════════════════════════════════
-    // 🚀 SEND TO OLLAMA
+    // 🚀 CONFIGURE OLLAMA CLIENT FOR CLOUD
+    // ═══════════════════════════════════════════════════════════
+    
+    const ollama = new Ollama({
+      host: 'https://ollama.com',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    // ═══════════════════════════════════════════════════════════
+    // 📡 STREAMING RESPONSE
     // ═══════════════════════════════════════════════════════════
     
     if (stream) {
@@ -74,6 +88,10 @@ export default async function handler(req, res) {
       res.end();
 
     } else {
+      // ═══════════════════════════════════════════════════════════
+      // 💬 SYNC RESPONSE
+      // ═══════════════════════════════════════════════════════════
+      
       const response = await ollama.chat({
         model,
         messages,
@@ -88,21 +106,33 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Ollama API Error:', error);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
     
-    if (error.message?.includes('401') || error.message?.includes('unauthorized')) {
+    // Handle specific errors
+    if (error.name === 'TypeError' && error.message?.includes('fetch')) {
+      return res.status(503).json({ 
+        error: 'Cannot connect to Ollama Cloud. Network error.',
+        hint: 'Please check your internet connection and try again.',
+      });
+    }
+    
+    if (error.response?.status === 401 || error.message?.includes('401')) {
       return res.status(401).json({ 
         error: 'Invalid API key. Please check your key in Settings.',
       });
     }
     
-    if (error.message?.includes('fetch failed') || error.message?.includes('ENOTFOUND')) {
-      return res.status(503).json({ 
-        error: 'Cannot connect to Ollama Cloud. Please try again.',
+    if (error.response?.status === 404 || error.message?.includes('model')) {
+      return res.status(404).json({ 
+        error: `Model "${req.body.model || 'minimax-m2.7:cloud'}" not found.`,
+        hint: 'Try selecting a different model in Settings.',
       });
     }
     
     return res.status(500).json({ 
       error: error.message || 'Failed to get response from Ollama',
+      hint: 'Please try again or select a different model.',
     });
   }
 }
