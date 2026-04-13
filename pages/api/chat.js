@@ -1,14 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
-// 🤖 OLLAMA CHAT API ROUTE (Server-Side Only)
+// 🤖 OLLAMA CHAT API ROUTE
 // ═══════════════════════════════════════════════════════════════
 
 import ollama from 'ollama';
 
 export default async function handler(req, res) {
-  // ═══════════════════════════════════════════════════════════════
-  // 🌟 CORS HEADERS
-  // ═══════════════════════════════════════════════════════════════
-  
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -22,38 +18,31 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ═══════════════════════════════════════════════════════════════
-    // 🔐 AUTHENTICATION
-    // ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════
+    // 🔐 GET CONFIGURATION
+    // ═══════════════════════════════════════════════════════════
     
     const apiKey = process.env.OLLAMA_API_KEY;
     const model = process.env.OLLAMA_MODEL || 'minimax-m2.7:cloud';
 
     if (!apiKey) {
       return res.status(500).json({ 
-        error: '❌ OLLAMA_API_KEY not configured. Please add to .env file.' 
+        error: 'OLLAMA_API_KEY not configured. Please add it to your Render environment variables.',
+        setupUrl: 'https://ollama.com/settings/keys',
       });
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // 📥 GET REQUEST DATA
-    // ═══════════════════════════════════════════════════════════════
-    
     const { messages, stream = true } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'Invalid messages format' });
+      return res.status(400).json({ error: 'Invalid messages format. Expected array.' });
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // 🚀 SEND TO OLLAMA CLOUD API
-    // ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════
+    // 🚀 SEND TO OLLAMA
+    // ═══════════════════════════════════════════════════════════
     
     if (stream) {
-      // ═══════════════════════════════════════════════════════════
-      // 📡 STREAMING RESPONSE
-      // ═══════════════════════════════════════════════════════════
-      
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
@@ -69,8 +58,6 @@ export default async function handler(req, res) {
       for await (const part of response) {
         if (part.message?.content) {
           fullContent += part.message.content;
-          
-          // Send SSE event
           res.write(`data: ${JSON.stringify({ 
             content: part.message.content,
             done: false 
@@ -78,7 +65,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // Send completion event
       res.write(`data: ${JSON.stringify({ 
         content: '',
         done: true,
@@ -88,10 +74,6 @@ export default async function handler(req, res) {
       res.end();
 
     } else {
-      // ═══════════════════════════════════════════════════════════
-      // 💬 SYNC RESPONSE
-      // ═══════════════════════════════════════════════════════════
-      
       const response = await ollama.chat({
         model,
         messages,
@@ -107,8 +89,21 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('Ollama API Error:', error);
     
+    // Handle specific errors
+    if (error.message?.includes('401') || error.message?.includes('unauthorized')) {
+      return res.status(401).json({ 
+        error: 'Invalid API key. Please check your OLLAMA_API_KEY.',
+      });
+    }
+    
+    if (error.message?.includes('fetch failed') || error.message?.includes('ENOTFOUND')) {
+      return res.status(503).json({ 
+        error: 'Cannot connect to Ollama Cloud. Please check your internet connection.',
+      });
+    }
+    
     return res.status(500).json({ 
-      error: error.message || 'Failed to get response from Ollama' 
+      error: error.message || 'Failed to get response from Ollama',
     });
   }
 }
