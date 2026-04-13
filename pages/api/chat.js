@@ -26,8 +26,7 @@ export default async function handler(req, res) {
 
     if (!apiKey) {
       return res.status(400).json({ 
-        error: 'API key required. Please add your API key in Settings.',
-        hint: 'Click the ⚙️ settings icon and paste your Ollama API key',
+        error: 'API key required. Click ⚙️ Settings and add your Ollama API key.',
       });
     }
 
@@ -37,7 +36,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid messages format.' });
     }
 
-    // Model selection
+    // Model selection - use :cloud suffix for cloud models
     const model = requestModel || 'minimax-m2.7:cloud';
 
     // ═══════════════════════════════════════════════════════════
@@ -48,7 +47,6 @@ export default async function handler(req, res) {
       host: 'https://ollama.com',
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
       },
     });
 
@@ -60,6 +58,7 @@ export default async function handler(req, res) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
 
       const response = await ollama.chat({
         model,
@@ -106,33 +105,38 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Ollama API Error:', error);
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
     
+    // Parse error details
+    const errorMessage = error.message || '';
+    const errorStatus = error.status || error.response?.status;
+
     // Handle specific errors
-    if (error.name === 'TypeError' && error.message?.includes('fetch')) {
-      return res.status(503).json({ 
-        error: 'Cannot connect to Ollama Cloud. Network error.',
-        hint: 'Please check your internet connection and try again.',
-      });
-    }
-    
-    if (error.response?.status === 401 || error.message?.includes('401')) {
+    if (errorStatus === 401 || errorMessage.includes('unauthorized') || errorMessage.includes('401')) {
       return res.status(401).json({ 
         error: 'Invalid API key. Please check your key in Settings.',
       });
     }
     
-    if (error.response?.status === 404 || error.message?.includes('model')) {
+    if (errorMessage.includes('fetch failed') || errorMessage.includes('network') || errorMessage.includes('ENOTFOUND')) {
+      return res.status(503).json({ 
+        error: 'Cannot connect to Ollama Cloud. Please try again.',
+      });
+    }
+    
+    if (errorStatus === 404 || errorMessage.includes('not found')) {
       return res.status(404).json({ 
-        error: `Model "${req.body.model || 'minimax-m2.7:cloud'}" not found.`,
-        hint: 'Try selecting a different model in Settings.',
+        error: `Model not found. Try selecting a different model in Settings.`,
+      });
+    }
+    
+    if (errorStatus === 403) {
+      return res.status(403).json({ 
+        error: 'API key does not have access to this model.',
       });
     }
     
     return res.status(500).json({ 
-      error: error.message || 'Failed to get response from Ollama',
-      hint: 'Please try again or select a different model.',
+      error: `Error: ${errorMessage || 'Failed to get response from Ollama'}`,
     });
   }
-}
+        }
