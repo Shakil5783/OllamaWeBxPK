@@ -1,13 +1,12 @@
 {
   "name": "ollama-chat-webclient",
   "version": "1.0.0",
-  "description": "✨ Pro-level stylish web client for Ollama Cloud API with bold Unicode aesthetics",
+  "description": "✨ Pro-level web client for Ollama Cloud API",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "start": "next start"
   },
   "dependencies": {
     "next": "14.2.5",
