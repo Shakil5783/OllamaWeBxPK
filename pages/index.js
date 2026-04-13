@@ -5,44 +5,34 @@ export default function Home() {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [currentModel, setCurrentModel] = useState('minimax-m2.7:cloud');
   const [streamingContent, setStreamingContent] = useState('');
-  const [connectionError, setConnectionError] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [currentModel, setCurrentModel] = useState('minimax-m2.7:cloud');
   
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
 
   // ═══════════════════════════════════════════════════════════
-  // 🔗 CHECK CONNECTION
+  // 💾 LOAD API KEY FROM LOCALSTORAGE
   // ═══════════════════════════════════════════════════════════
   
   useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const response = await fetch('/api/health');
-        const data = await response.json();
-        
-        setIsConnected(data.connected);
-        if (data.model) setCurrentModel(data.model);
-        
-        if (data.error) {
-          setConnectionError(data);
-        } else {
-          setConnectionError(null);
-        }
-      } catch (error) {
-        setIsConnected(false);
-        setConnectionError({
-          error: 'Cannot reach server',
-          message: 'Please refresh the page or try again later',
-        });
-      }
-    };
+    const savedKey = localStorage.getItem('ollama_api_key');
+    if (savedKey) {
+      setApiKey(savedKey);
+    }
     
-    checkConnection();
+    const savedModel = localStorage.getItem('ollama_model');
+    if (savedModel) {
+      setCurrentModel(savedModel);
+    }
   }, []);
 
+  // ═══════════════════════════════════════════════════════════
+  // 🔄 AUTO-SCROLL
+  // ═══════════════════════════════════════════════════════════
+  
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
@@ -50,6 +40,20 @@ export default function Home() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, streamingContent, scrollToBottom]);
+
+  // ═══════════════════════════════════════════════════════════
+  // ⚙️ SAVE SETTINGS
+  // ═══════════════════════════════════════════════════════════
+  
+  const handleSaveSettings = () => {
+    if (apiKey.trim()) {
+      localStorage.setItem('ollama_api_key', apiKey.trim());
+    }
+    if (currentModel.trim()) {
+      localStorage.setItem('ollama_model', currentModel.trim());
+    }
+    setShowSettings(false);
+  };
 
   // ═══════════════════════════════════════════════════════════
   // 💬 SEND MESSAGE
@@ -60,6 +64,11 @@ export default function Home() {
     
     const userMessage = inputValue.trim();
     if (!userMessage || isLoading) return;
+    
+    if (!apiKey && !process.env.NEXT_PUBLIC_DEMO_MODE) {
+      setShowSettings(true);
+      return;
+    }
 
     setInputValue('');
     setIsLoading(true);
@@ -92,8 +101,15 @@ export default function Home() {
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, stream: true }),
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey || '',
+        },
+        body: JSON.stringify({ 
+          messages: apiMessages, 
+          stream: true,
+          model: currentModel,
+        }),
         signal: abortControllerRef.current.signal,
       });
 
@@ -138,7 +154,7 @@ export default function Home() {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === assistantMsg.id
-              ? { ...msg, content: '⚠️ Generation stopped by user' }
+              ? { ...msg, content: '⏹️ Generation stopped' }
               : msg
           )
         );
@@ -146,7 +162,7 @@ export default function Home() {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === assistantMsg.id
-              ? { ...msg, content: `⚠️ Error: ${error.message}` }
+              ? { ...msg, content: `⚠️ ${error.message}` }
               : msg
           )
         );
@@ -158,9 +174,7 @@ export default function Home() {
   };
 
   const handleAbort = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    abortControllerRef.current?.abort();
   };
 
   const handleClearChat = () => {
@@ -171,245 +185,304 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>🤖 Ollama Chat Pro | Cloud AI</title>
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
+        <title>Ollama Chat</title>
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
       </Head>
 
-      <div className="min-h-screen bg-slate-950">
-        {/* 🌟 HEADER */}
-        <header className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-xl border-b border-slate-800">
-          <div className="max-w-4xl mx-auto px-4 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-4xl">🤖</span>
-                <div>
-                  <h1 className="text-2xl font-black bg-gradient-to-r from-cyan-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
-                    OLLAMA CHAT PRO
-                  </h1>
-                  <p className="text-xs text-slate-500">
-                    ✨ {currentModel} • Streaming Ready
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 shadow-lg shadow-green-500/50' : 'bg-red-500 animate-pulse'}`} />
-                  <span className="text-xs text-slate-400">
-                    {isConnected ? '🟢 Ready' : '🔴 Not Configured'}
-                  </span>
-                </div>
-
-                {messages.length > 0 && (
-                  <button
-                    onClick={handleClearChat}
-                    className="px-3 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors text-slate-300"
-                  >
-                    🗑️ Clear
-                  </button>
-                )}
-              </div>
+      {/* ═══════════════════════════════════════════════════════════
+           🎨 MAIN CONTAINER
+           ═══════════════════════════════════════════════════════════ */}
+      <div className="min-h-screen bg-black text-white flex flex-col">
+        
+        {/* ═══════════════════════════════════════════════════════════
+             🌸 HEADER
+             ═══════════════════════════════════════════════════════════ */}
+        <header className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center font-bold text-lg">
+              O
             </div>
+            <div>
+              <h1 className="text-lg font-semibold tracking-tight">Ollama Chat</h1>
+              <p className="text-xs text-zinc-500">{currentModel}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowSettings(true)}
+              className="p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 transition-colors"
+              title="Settings"
+            >
+              <svg className="w-5 h-5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
           </div>
         </header>
 
-        {/* ⚠️ ERROR BANNER */}
-        {connectionError && (
-          <div className="bg-red-500/10 border-b border-red-500/30">
-            <div className="max-w-4xl mx-auto px-4 py-4">
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">⚠️</span>
-                <div>
-                  <h3 className="font-bold text-red-400">Configuration Required</h3>
-                  <p className="text-sm text-red-300/80 mt-1">
-                    {connectionError.error}
-                  </p>
-                  <p className="text-xs text-red-400/60 mt-2">
-                    {connectionError.message}
-                  </p>
-                  {connectionError.setupUrl && (
-                    <a
-                      href={connectionError.setupUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-block mt-3 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 rounded-lg text-sm text-red-300 transition-colors"
-                    >
-                      🔗 Get API Key →
-                    </a>
-                  )}
+        {/* ═══════════════════════════════════════════════════════════
+             💬 MESSAGES AREA
+             ═══════════════════════════════════════════════════════════ */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-3xl mx-auto px-6 py-8">
+            
+            {/* Welcome State */}
+            {messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-600/20 to-fuchsia-600/20 border border-violet-500/20 flex items-center justify-center mb-6">
+                  <span className="text-4xl">✨</span>
                 </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 💬 CHAT AREA */}
-        <main className="max-w-4xl mx-auto px-4 py-6 pb-32">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center min-h-96 text-center">
-              <span className="text-8xl mb-6 animate-bounce">🌟</span>
-              <h2 className="text-4xl font-black bg-gradient-to-r from-cyan-400 via-purple-500 to-pink-500 bg-clip-text text-transparent mb-4">
-                Welcome to Ollama Chat Pro
-              </h2>
-              <p className="text-slate-400 max-w-xl mb-8">
-                🚀 Start a conversation with AI-powered by Ollama Cloud
-              </p>
-              
-              {!isConnected && (
-                <div className="p-6 bg-yellow-500/10 border border-yellow-500/30 rounded-xl max-w-xl">
-                  <p className="text-yellow-300 font-bold mb-2">⚠️ Setup Required</p>
-                  <p className="text-sm text-yellow-200/80 mb-4">
-                    Add <code className="bg-slate-800 px-2 py-1 rounded">OLLAMA_API_KEY</code> to your Render environment variables.
-                  </p>
-                  <a
-                    href="https://ollama.com/settings/keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 rounded-xl font-bold text-white transition-all"
-                  >
-                    🔑 Get API Key from Ollama.com
-                  </a>
-                </div>
-              )}
-
-              {isConnected && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
+                <h2 className="text-2xl font-semibold mb-2">Start a conversation</h2>
+                <p className="text-zinc-500 mb-8 max-w-md">
+                  Ask questions, get explanations, or explore ideas with AI
+                </p>
+                
+                {/* Example Prompts */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg">
                   {[
-                    '💡 Explain quantum computing simply',
-                    '🎨 Write a creative story about AI',
-                    '📚 Help me understand ML basics',
-                    '🌍 Latest advancements in AI?',
+                    'Explain quantum computing',
+                    'Write a Python function',
+                    'What is machine learning?',
+                    'Help me brainstorm ideas',
                   ].map((prompt, i) => (
                     <button
                       key={i}
-                      onClick={() => setInputValue(prompt.substring(2))}
-                      className="p-4 text-left bg-slate-900/50 hover:bg-slate-800/50 rounded-xl border border-slate-800 hover:border-purple-500/50 transition-all text-sm text-slate-300"
+                      onClick={() => setInputValue(prompt)}
+                      className="p-4 text-left rounded-xl bg-zinc-900/50 hover:bg-zinc-900 border border-zinc-800/50 hover:border-zinc-700 transition-all text-sm text-zinc-300 group"
                     >
-                      {prompt}
+                      <span className="text-zinc-500 group-hover:text-zinc-300 transition-colors">{prompt}</span>
+                      <span className="block mt-2 text-xs text-violet-500/60 group-hover:text-violet-500 transition-colors">Click to try →</span>
                     </button>
                   ))}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
 
-          <div className="space-y-4">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
+            {/* Messages */}
+            <div className="space-y-6">
+              {messages.map((message) => (
                 <div
-                  className={`max-w-2xl rounded-2xl px-6 py-4 ${
-                    message.role === 'user'
-                      ? 'bg-gradient-to-br from-cyan-500/20 to-purple-500/10 border border-cyan-500/30 rounded-tr-sm'
-                      : 'bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/20 rounded-tl-sm'
-                  }`}
+                  key={message.id}
+                  className={`flex gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
                 >
-                  <div className="flex items-center gap-2 mb-2">
-                    <span>{message.role === 'user' ? '👤' : '🤖'}</span>
-                    <span className={`text-xs font-bold uppercase tracking-wider ${
-                      message.role === 'user' ? 'text-cyan-400' : 'text-purple-400'
+                  {/* Avatar */}
+                  <div className={`w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center text-sm ${
+                    message.role === 'user'
+                      ? 'bg-gradient-to-br from-cyan-500 to-blue-600'
+                      : 'bg-gradient-to-br from-violet-600 to-fuchsia-600'
+                  }`}>
+                    {message.role === 'user' ? '👤' : '🤖'}
+                  </div>
+                  
+                  {/* Message Bubble */}
+                  <div className={`max-w-[80%] space-y-2 ${
+                    message.role === 'user' ? 'items-end' : 'items-start'
+                  }`}>
+                    <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                      message.role === 'user'
+                        ? 'bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-500/20 rounded-tr-sm'
+                        : 'bg-zinc-900/80 border border-zinc-800/50 rounded-tl-sm'
                     }`}>
-                      {message.role}
-                    </span>
-                  </div>
-                  <div className="text-base leading-relaxed whitespace-pre-wrap">
-                    {message.content}
+                      {message.content}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-
-          {streamingContent && (
-            <div className="flex justify-start mt-4">
-              <div className="max-w-2xl rounded-2xl rounded-tl-sm px-6 py-4 bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/20">
-                <div className="flex items-center gap-2 mb-2">
-                  <span>🤖</span>
-                  <span className="text-xs font-bold uppercase tracking-wider text-purple-400">
-                    streaming
-                  </span>
-                  <div className="flex gap-1 ml-2">
-                    <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" />
-                    <span className="w-2 h-2 bg-purple-400 rounded-full animate-bounce delay-100" />
-                    <span className="w-2 h-2 bg-pink-400 rounded-full animate-bounce delay-200" />
-                  </div>
-                </div>
-                <div className="text-base leading-relaxed whitespace-pre-wrap text-slate-300">
-                  {streamingContent}<span className="animate-pulse text-purple-400">▊</span>
-                </div>
-              </div>
+              ))}
             </div>
-          )}
 
-          {isLoading && !streamingContent && (
-            <div className="flex justify-start mt-4">
-              <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/20 rounded-2xl rounded-tl-sm px-6 py-4">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl animate-bounce">🤖</span>
+            {/* Streaming Indicator */}
+            {streamingContent && (
+              <div className="flex gap-4 mt-6">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center text-sm flex-shrink-0">
+                  🤖
+                </div>
+                <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-zinc-900/80 border border-zinc-800/50 text-sm">
+                  <div className="flex gap-1 mb-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse delay-100" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse delay-200" />
+                  </div>
+                  {streamingContent}<span className="animate-pulse">▊</span>
+                </div>
+              </div>
+            )}
+
+            {/* Loading */}
+            {isLoading && !streamingContent && (
+              <div className="flex gap-4 mt-6">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center text-sm flex-shrink-0">
+                  🤖
+                </div>
+                <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-zinc-900/80 border border-zinc-800/50">
                   <div className="flex gap-1">
-                    <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" />
-                    <span className="w-2 h-2 bg-purple-400 rounded-full animate-bounce delay-100" />
-                    <span className="w-2 h-2 bg-pink-400 rounded-full animate-bounce delay-200" />
+                    <span className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-fuchsia-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-pink-500 animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} />
+          </div>
         </main>
 
-        {/* ✏️ INPUT AREA */}
-        <footer className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur-xl border-t border-slate-800">
-          <div className="max-w-4xl mx-auto px-4 py-4">
-            <form onSubmit={handleSendMessage} className="flex gap-3">
-              <div className="flex-1">
-                <textarea
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage(e);
-                    }
-                  }}
-                  placeholder={isConnected ? "✨ Type your message... (Enter to send)" : "⚠️ API key not configured"}
-                  disabled={isLoading || !isConnected}
-                  rows={1}
-                  className="w-full px-6 py-4 bg-slate-800 border-2 border-slate-700 focus:border-purple-500 rounded-2xl text-white placeholder-slate-500 resize-none outline-none transition-colors disabled:opacity-50"
-                  style={{ maxHeight: '200px' }}
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <button
-                  type="submit"
-                  disabled={isLoading || !inputValue.trim() || !isConnected}
-                  className="px-8 py-4 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 rounded-2xl font-bold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-purple-500/25"
-                >
-                  {isLoading ? '⏳' : '🚀'} Send
-                </button>
-
+        {/* ═══════════════════════════════════════════════════════════
+             ✏️ INPUT AREA
+             ═══════════════════════════════════════════════════════════ */}
+        <footer className="border-t border-zinc-800/50 bg-zinc-950/50 backdrop-blur-xl">
+          <div className="max-w-3xl mx-auto px-6 py-4">
+            <form onSubmit={handleSendMessage} className="relative">
+              <textarea
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage(e);
+                  }
+                }}
+                placeholder="Type a message..."
+                disabled={isLoading}
+                rows={1}
+                className="w-full px-4 py-3 pr-24 bg-zinc-900 border border-zinc-800 focus:border-violet-500/50 rounded-xl text-sm text-white placeholder-zinc-600 resize-none outline-none transition-colors disabled:opacity-50 focus:ring-2 focus:ring-violet-500/20"
+                style={{ maxHeight: '150px' }}
+              />
+              
+              <div className="absolute right-2 bottom-2 flex gap-2">
                 {isLoading && (
                   <button
                     type="button"
                     onClick={handleAbort}
-                    className="px-4 py-2 bg-red-500/20 border border-red-500/50 hover:bg-red-500/30 rounded-xl text-sm text-red-400 transition-colors"
+                    className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+                    title="Stop"
                   >
-                    🛑 Stop
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
                   </button>
                 )}
+                <button
+                  type="submit"
+                  disabled={isLoading || !inputValue.trim()}
+                  className="p-2 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
               </div>
             </form>
-
-            <p className="mt-3 text-center text-xs text-slate-600">
-              💡 Press Enter to send • Model: {currentModel}
-            </p>
+            
+            {messages.length > 0 && (
+              <div className="flex justify-center mt-3">
+                <button
+                  onClick={handleClearChat}
+                  className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                >
+                  Clear conversation
+                </button>
+              </div>
+            )}
           </div>
         </footer>
+
+        {/* ═══════════════════════════════════════════════════════════
+             ⚙️ SETTINGS MODAL
+             ═══════════════════════════════════════════════════════════ */}
+        {showSettings && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <div 
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowSettings(false)}
+            />
+            
+            {/* Modal */}
+            <div className="relative w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl p-6 shadow-2xl">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-semibold">Settings</h2>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="p-2 rounded-lg hover:bg-zinc-800 transition-colors"
+                >
+                  <svg className="w-5 h-5 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* API Key Input */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-300 mb-2">
+                    API Key
+                  </label>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="ollama-xxxxxxxxxxxx"
+                    className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 focus:border-violet-500/50 rounded-xl text-sm text-white placeholder-zinc-600 outline-none transition-colors focus:ring-2 focus:ring-violet-500/20"
+                  />
+                  <p className="mt-2 text-xs text-zinc-500">
+                    Get your key from{' '}
+                    <a 
+                      href="https://ollama.com/settings/keys" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-violet-400 hover:text-violet-300"
+                    >
+                      ollama.com/settings/keys
+                    </a>
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-zinc-300 mb-2">
+                    Model
+                  </label>
+                  <select
+                    value={currentModel}
+                    onChange={(e) => setCurrentModel(e.target.value)}
+                    className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 focus:border-violet-500/50 rounded-xl text-sm text-white outline-none transition-colors focus:ring-2 focus:ring-violet-500/20 cursor-pointer"
+                  >
+                    <option value="minimax-m2.7:cloud">minimax-m2.7:cloud</option>
+                    <option value="llama3.1:cloud">llama3.1:cloud</option>
+                    <option value="llama3.1:8b">llama3.1:8b</option>
+                    <option value="mistral:7b">mistral:7b</option>
+                    <option value="gpt-oss:120b-cloud">gpt-oss:120b-cloud</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="flex-1 px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveSettings}
+                  className="flex-1 px-4 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 text-sm font-medium transition-opacity"
+                >
+                  Save
+                </button>
+              </div>
+
+              {/* Note */}
+              <p className="mt-4 text-xs text-zinc-600 text-center">
+                API key is stored locally in your browser and is never sent to our servers.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
-    }
+}
